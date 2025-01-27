@@ -128,9 +128,27 @@ def convert_to_conversation(text, progress_bar):
         
         # Create streaming response
         stream = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Convert the following text into a natural dialogue between the speakers identified by the speaker labels with line breaks between speakers."},
+                {"role": "system", "content": """
+                You are an expert medical transcriptionist with years of experience in documenting clinical conversations. 
+                Your task is to convert the following text into a precise dialogue format, ensuring:
+                
+                1. Maintain absolute accuracy of medical terminology and dosages
+                2. Preserve all clinical details, no matter how minor they might seem
+                3. Keep exact numbers, measurements, and timelines as mentioned
+                4. Retain all mentions of:
+                   - Symptoms and their duration
+                   - Medications and their dosages
+                   - Treatment plans and schedules
+                   - Patient concerns and doctor's responses
+                   - Follow-up instructions
+                   - Side effects or adverse reactions discussed
+                   - Lifestyle recommendations
+                
+                Format the conversation as a natural dialogue with clear speaker labels and line breaks between speakers.
+                Do not summarize or omit any details - every word could be clinically significant.
+                """},
                 {"role": "user", "content": text}
             ],
             stream=True
@@ -428,10 +446,24 @@ def main():
                     # Display audio player
                     st.audio(wav_io, format='audio/wav')
                     
+                    # Check if files exist before showing the load button
+                    associated_files = find_associated_files(audio_file)
+                    has_files = associated_files['transcription'] is not None or associated_files['conversation'] is not None
+                    
                     # Add a button to load the file content
-                    if st.button(f"Load {format_filename(audio_file)}", key=f"btn_{audio_file}"):
-                        st.session_state.selected_audio = audio_file
-                        st.rerun()
+                    button_label = f"Load {format_filename(audio_file)}"
+                    if has_files:
+                        if st.button(button_label, key=f"btn_{audio_file}"):
+                            st.session_state.selected_audio = audio_file
+                            st.rerun()
+                    else:
+                        # Disabled button with tooltip
+                        st.button(
+                            button_label, 
+                            key=f"btn_{audio_file}", 
+                            disabled=True,
+                            help="No transcription or conversation available yet"
+                        )
 
             except Exception as e:
                 st.error(f"Unable to play audio file. Error: {str(e)}")
@@ -449,6 +481,9 @@ def main():
             original_filename = os.path.splitext(uploaded_file.name)[0]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
+            # Save the uploaded file first
+            saved_file_path = save_uploaded_file(uploaded_file)
+            
             # Get audio duration
             audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
             duration_minutes = len(audio)/1000/60
@@ -458,46 +493,74 @@ def main():
             with col2:
                 st.caption(f"🎵 Duration: {duration_minutes:.1f} min")
             
-            # Create single progress bar above tabs
-            progress_bar = st.progress(0, text="Starting...")
-            
             # Create tabs
             tab1, tab2, tab3 = st.tabs(["Transcription", "Conversation", "Medical Summary"])
             
-            # Process audio using the bytes we already have
-            transcription = transcribe_audio(audio_bytes, progress_bar)
+            # Check for existing files first
+            associated_files = find_associated_files(saved_file_path)
             
-            if transcription:
-                # Save transcription
-                transcription_path = save_transcription(transcription, original_filename, timestamp)
-                
-                # Transcription tab
-                with tab1:
-                    st.header("Transcription")
-                    st.write(transcription)
-                    st.caption(f"📝 Saved to: {os.path.basename(transcription_path)}")
-                
-                # Conversation tab
-                with tab2:
-                    st.header("Conversation")
-                    conversation = convert_to_conversation(transcription, progress_bar)
-                    if conversation:
-                        # Save conversation
-                        conversation_path = save_conversation(conversation, original_filename, timestamp)
-                        st.caption(f"💬 Saved to: {os.path.basename(conversation_path)}")
-                
-                # Medical Summary tab
-                with tab3:
-                    st.header("Medical Summary")
-                    if st.button("Generate Medical Summary"):
-                        medical_info = extract_medical_info(conversation if conversation else transcription, progress_bar)
+            # Transcription tab
+            with tab1:
+                st.header("Transcription")
+                if associated_files['transcription']:
+                    content = load_markdown_file(associated_files['transcription'])
+                    if content:
+                        st.markdown(content)
+                else:
+                    # Only transcribe if no existing file
+                    progress_bar = st.progress(0, text="Starting transcription...")
+                    transcription = transcribe_audio(audio_bytes, progress_bar)
+                    if transcription:
+                        transcription_path = save_transcription(transcription, original_filename, timestamp)
+                        st.markdown(load_markdown_file(transcription_path))
+            
+            # Conversation tab
+            with tab2:
+                st.header("Conversation")
+                if associated_files['conversation']:
+                    content = load_markdown_file(associated_files['conversation'])
+                    if content:
+                        st.markdown(content)
+                else:
+                    # Only generate conversation if no existing file
+                    if transcription:
+                        progress_bar = st.progress(0, text="Generating conversation...")
+                        conversation = convert_to_conversation(transcription, progress_bar)
+                        if conversation:
+                            conversation_path = save_conversation(conversation, original_filename, timestamp)
+                            st.markdown(load_markdown_file(conversation_path))
+            
+            # Medical Summary tab
+            with tab3:
+                st.header("Medical Summary")
+                if st.button("Generate Medical Summary"):
+                    # Always try to get content from stored files first
+                    content = None
+                    progress_bar = st.progress(0, text="Starting...")
+                    
+                    # Try to get conversation first, then transcription
+                    if associated_files['conversation']:
+                        content = load_markdown_file(associated_files['conversation'])
+                        # Remove the markdown headers to get just the content
+                        if content:
+                            content = content.split("## Dialogue\n\n")[-1]
+                    elif associated_files['transcription']:
+                        content = load_markdown_file(associated_files['transcription'])
+                        if content:
+                            content = content.split("## Content\n\n")[-1]
+                    
+                    if content:
+                        medical_info = extract_medical_info(content, progress_bar)
                         if medical_info:
+                            st.markdown(medical_info)
                             st.download_button(
                                 label="Download Summary",
                                 data=medical_info,
                                 file_name="medical_summary.txt",
                                 mime="text/plain"
                             )
+                    else:
+                        st.error("No transcription or conversation found. Please process the audio file first.")
 
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
@@ -535,17 +598,25 @@ def main():
             with tab3:
                 st.header("Medical Summary")
                 if st.button("Generate Medical Summary"):
-                    # Get the transcription or conversation content
+                    # First try to get content from stored files
                     content = None
+                    progress_bar = st.progress(0, text="Starting...")
+                    
+                    # Try to get conversation first, then transcription
                     if associated_files['conversation']:
                         content = load_markdown_file(associated_files['conversation'])
+                        # Remove the markdown headers to get just the content
+                        if content:
+                            content = content.split("## Dialogue\n\n")[-1]
                     elif associated_files['transcription']:
                         content = load_markdown_file(associated_files['transcription'])
+                        if content:
+                            content = content.split("## Content\n\n")[-1]
                     
                     if content:
-                        progress_bar = st.progress(0, text="Starting...")
                         medical_info = extract_medical_info(content, progress_bar)
                         if medical_info:
+                            st.markdown(medical_info)
                             st.download_button(
                                 label="Download Summary",
                                 data=medical_info,
@@ -553,7 +624,7 @@ def main():
                                 mime="text/plain"
                             )
                     else:
-                        st.error("No content available for medical summary")
+                        st.error("No content available for medical summary. Please process the audio file first.")
 
         except Exception as e:
             st.error(f"Error loading file content: {str(e)}")
