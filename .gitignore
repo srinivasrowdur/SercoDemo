@@ -4,6 +4,12 @@
 # Audio files directory
 audio/
 
+# Transcriptions directory
+transcriptions/
+
+# Conversations directory
+conversations/
+
 # Python
 __pycache__/
 *.py[cod]

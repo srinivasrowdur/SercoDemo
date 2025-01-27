@@ -269,6 +269,83 @@ def get_file_date(filepath):
 def get_or_create_session_state():
     if 'file_just_uploaded' not in st.session_state:
         st.session_state.file_just_uploaded = False
+    if 'selected_audio' not in st.session_state:
+        st.session_state.selected_audio = None
+
+def save_transcription(transcription, original_filename, timestamp):
+    """Save transcription to transcriptions folder"""
+    # Create transcriptions directory if it doesn't exist
+    transcriptions_dir = "transcriptions"
+    if not os.path.exists(transcriptions_dir):
+        os.makedirs(transcriptions_dir)
+    
+    # Create filename with just the date (not time)
+    date_only = timestamp.split('_')[0]  # Get YYYYMMDD part
+    new_filename = f"{original_filename}_{date_only}.md"
+    file_path = os.path.join(transcriptions_dir, new_filename)
+    
+    # Save the transcription with metadata
+    with open(file_path, "w", encoding='utf-8') as f:
+        f.write(f"# Transcription: {original_filename}\n")
+        f.write(f"Date: {datetime.strptime(date_only, '%Y%m%d').strftime('%B %d, %Y')}\n\n")
+        f.write("## Content\n\n")
+        f.write(transcription)
+    
+    return file_path
+
+def save_conversation(conversation, original_filename, timestamp):
+    """Save conversation to conversations folder"""
+    # Create conversations directory if it doesn't exist
+    conversations_dir = "conversations"
+    if not os.path.exists(conversations_dir):
+        os.makedirs(conversations_dir)
+    
+    # Create filename with just the date (not time)
+    date_only = timestamp.split('_')[0]  # Get YYYYMMDD part
+    new_filename = f"{original_filename}_{date_only}.md"
+    file_path = os.path.join(conversations_dir, new_filename)
+    
+    # Save the conversation with metadata
+    with open(file_path, "w", encoding='utf-8') as f:
+        f.write(f"# Conversation: {original_filename}\n")
+        f.write(f"Date: {datetime.strptime(date_only, '%Y%m%d').strftime('%B %d, %Y')}\n\n")
+        f.write("## Dialogue\n\n")
+        f.write(conversation)
+    
+    return file_path
+
+def find_associated_files(audio_filename):
+    """Find associated transcription and conversation files"""
+    # Get the original filename without the timestamp
+    filename = os.path.basename(audio_filename)
+    original_name = filename.split('_')[0]  # Get the part before first underscore
+    
+    # Get just the date from the audio filename
+    date_only = filename.split('_')[-2]  # Get YYYYMMDD part
+    
+    # Create the base filename that matches our saved files
+    base_filename = f"{original_name}_{date_only}"
+    
+    # Look for matching files with .md extension
+    transcription_path = os.path.join("transcriptions", f"{base_filename}.md")
+    conversation_path = os.path.join("conversations", f"{base_filename}.md")
+    
+    # Check if files exist
+    trans_exists = os.path.exists(transcription_path)
+    conv_exists = os.path.exists(conversation_path)
+    
+    return {
+        'transcription': transcription_path if trans_exists else None,
+        'conversation': conversation_path if conv_exists else None
+    }
+
+def load_markdown_file(filepath):
+    """Load and return contents of a markdown file"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return None
 
 def main():
     get_or_create_session_state()
@@ -343,13 +420,19 @@ def main():
                 # Audio player with better error handling
                 with open(audio_file, 'rb') as f:
                     audio_bytes = f.read()
-                    # Create an AudioSegment to verify the file
                     audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
-                    # Convert to WAV format for better compatibility
                     wav_io = io.BytesIO()
                     audio.export(wav_io, format='wav')
                     wav_io.seek(0)
+                    
+                    # Display audio player
                     st.audio(wav_io, format='audio/wav')
+                    
+                    # Add a button to load the file content
+                    if st.button(f"Load {format_filename(audio_file)}", key=f"btn_{audio_file}"):
+                        st.session_state.selected_audio = audio_file
+                        st.rerun()
+
             except Exception as e:
                 st.error(f"Unable to play audio file. Error: {str(e)}")
 
@@ -361,6 +444,10 @@ def main():
         try:
             # Get the bytes once and reuse
             audio_bytes = uploaded_file.getvalue()
+            
+            # Get original filename and timestamp
+            original_filename = os.path.splitext(uploaded_file.name)[0]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
             # Get audio duration
             audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
@@ -381,15 +468,23 @@ def main():
             transcription = transcribe_audio(audio_bytes, progress_bar)
             
             if transcription:
+                # Save transcription
+                transcription_path = save_transcription(transcription, original_filename, timestamp)
+                
                 # Transcription tab
                 with tab1:
                     st.header("Transcription")
                     st.write(transcription)
+                    st.caption(f"📝 Saved to: {os.path.basename(transcription_path)}")
                 
                 # Conversation tab
                 with tab2:
                     st.header("Conversation")
                     conversation = convert_to_conversation(transcription, progress_bar)
+                    if conversation:
+                        # Save conversation
+                        conversation_path = save_conversation(conversation, original_filename, timestamp)
+                        st.caption(f"💬 Saved to: {os.path.basename(conversation_path)}")
                 
                 # Medical Summary tab
                 with tab3:
@@ -406,8 +501,64 @@ def main():
 
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
+    elif st.session_state.selected_audio is not None:
+        try:
+            audio_file = st.session_state.selected_audio
+            
+            # Create tabs
+            tab1, tab2, tab3 = st.tabs(["Transcription", "Conversation", "Medical Summary"])
+            
+            # Find associated files
+            associated_files = find_associated_files(audio_file)
+            
+            # Transcription tab
+            with tab1:
+                st.header("Transcription")
+                if associated_files['transcription']:
+                    content = load_markdown_file(associated_files['transcription'])
+                    if content:
+                        st.markdown(content)
+                else:
+                    st.info("No transcription available")
+            
+            # Conversation tab
+            with tab2:
+                st.header("Conversation")
+                if associated_files['conversation']:
+                    content = load_markdown_file(associated_files['conversation'])
+                    if content:
+                        st.markdown(content)
+                else:
+                    st.info("No conversation available")
+            
+            # Medical Summary tab
+            with tab3:
+                st.header("Medical Summary")
+                if st.button("Generate Medical Summary"):
+                    # Get the transcription or conversation content
+                    content = None
+                    if associated_files['conversation']:
+                        content = load_markdown_file(associated_files['conversation'])
+                    elif associated_files['transcription']:
+                        content = load_markdown_file(associated_files['transcription'])
+                    
+                    if content:
+                        progress_bar = st.progress(0, text="Starting...")
+                        medical_info = extract_medical_info(content, progress_bar)
+                        if medical_info:
+                            st.download_button(
+                                label="Download Summary",
+                                data=medical_info,
+                                file_name="medical_summary.txt",
+                                mime="text/plain"
+                            )
+                    else:
+                        st.error("No content available for medical summary")
+
+        except Exception as e:
+            st.error(f"Error loading file content: {str(e)}")
     else:
-        st.write("Upload an MP3 file to get started.")
+        st.write("Upload an MP3 file or select an existing recording to get started.")
 
 if __name__ == "__main__":
     main()
