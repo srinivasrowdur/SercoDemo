@@ -7,6 +7,7 @@ import shutil
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
+import glob
 
 # Load environment variables from .env file
 load_dotenv()
@@ -238,64 +239,175 @@ def save_uploaded_file(uploaded_file):
     
     return file_path
 
-# Set page title
-st.title("Audio Transcription App")
+def list_audio_files():
+    """List all audio files in the audio directory"""
+    if not os.path.exists("audio"):
+        return []
+    return sorted(glob.glob("audio/*.mp3"), key=os.path.getmtime, reverse=True)
 
-# Sidebar for file upload
-uploaded_file = st.sidebar.file_uploader("Upload MP3", type=["mp3"])
+def format_filename(filepath):
+    """Format filename for display"""
+    filename = os.path.basename(filepath)
+    name, _ = os.path.splitext(filename)
+    # Split by underscore and remove timestamp
+    parts = name.split('_')[:-2]  # Assuming format: name_YYYYMMDD_HHMMSS
+    return ' '.join(parts).title()
 
-if uploaded_file is not None:
-    try:
-        # Save the uploaded file
-        saved_file_path = save_uploaded_file(uploaded_file)
-        st.caption(f"📁 File saved: {os.path.basename(saved_file_path)}")
-        
-        # Get the bytes directly from the uploaded file
-        audio_bytes = uploaded_file.read()
-        
-        # Get audio duration
-        audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
-        duration_minutes = len(audio)/1000/60
-        
-        # Display duration in a sleek format
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            st.caption(f"🎵 Duration: {duration_minutes:.1f} min")
-        
-        # Create single progress bar above tabs
-        progress_bar = st.progress(0, text="Starting...")
-        
-        # Create tabs
-        tab1, tab2, tab3 = st.tabs(["Transcription", "Conversation", "Medical Summary"])
-        
-        # Process audio
-        transcription = transcribe_audio(audio_bytes, progress_bar)
-            
-        if transcription:
-            # Transcription tab
-            with tab1:
-                st.header("Transcription")
-                st.write(transcription)
-            
-            # Conversation tab
-            with tab2:
-                st.header("Conversation")
-                conversation = convert_to_conversation(transcription, progress_bar)
-            
-            # Medical Summary tab
-            with tab3:
-                st.header("Medical Summary")
-                if st.button("Generate Medical Summary"):
-                    medical_info = extract_medical_info(conversation if conversation else transcription, progress_bar)
-                    if medical_info:
-                        st.download_button(
-                            label="Download Summary",
-                            data=medical_info,
-                            file_name="medical_summary.txt",
-                            mime="text/plain"
-                        )
+def get_file_date(filepath):
+    """Get formatted date from filename"""
+    filename = os.path.basename(filepath)
+    timestamp = filename.split('_')[-2:]  # Get YYYYMMDD_HHMMSS
+    if len(timestamp) >= 2:
+        datetime_str = f"{timestamp[0]}_{timestamp[1]}"
+        try:
+            file_date = datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
+            return file_date.strftime("%b %d, %Y %I:%M %p")
+        except:
+            return "Date unknown"
+    return "Date unknown"
 
-    except Exception as e:
-        st.error(f"Error processing file: {str(e)}")
-else:
-    st.write("Upload an MP3 file to get started.")
+def get_or_create_session_state():
+    if 'file_just_uploaded' not in st.session_state:
+        st.session_state.file_just_uploaded = False
+
+def main():
+    get_or_create_session_state()
+    
+    # Set page title
+    st.title("Audio Transcription App")
+
+    # Sidebar for file upload
+    st.sidebar.title("Audio Files")
+
+    # File uploader
+    uploaded_file = st.sidebar.file_uploader("Upload New MP3", type=["mp3"], 
+                                           on_change=lambda: setattr(st.session_state, 'file_just_uploaded', True))
+
+    # If a file was just uploaded, save it and rerun
+    if st.session_state.file_just_uploaded:
+        if uploaded_file is not None:
+            # Save the uploaded file
+            saved_file_path = save_uploaded_file(uploaded_file)
+            st.session_state.file_just_uploaded = False  # Reset the flag
+            st.rerun()  # Rerun the app to update the sidebar
+        
+    # Divider
+    st.sidebar.markdown("---")
+
+    # List existing files
+    st.sidebar.subheader("Previous Recordings")
+    
+    # Get list of audio files
+    audio_files = list_audio_files()
+    
+    # Display audio files with custom styling
+    for audio_file in audio_files:
+        with st.sidebar.container():
+            # Custom CSS for the audio container
+            st.markdown("""
+            <style>
+            .audio-container {
+                background-color: #1E1E1E;
+                border-radius: 10px;
+                padding: 10px;
+                margin: 10px 0;
+            }
+            .file-name {
+                color: #FFFFFF;
+                font-size: 16px;
+                margin-bottom: 5px;
+            }
+            .file-date {
+                color: #888888;
+                font-size: 12px;
+            }
+            .waveform {
+                background: linear-gradient(90deg, #4CAF50 0%, #2196F3 100%);
+                height: 40px;
+                border-radius: 5px;
+                margin: 5px 0;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
+            # Create a custom container for each audio file
+            st.markdown(f"""
+            <div class="audio-container">
+                <div class="file-name">{format_filename(audio_file)}</div>
+                <div class="file-date">{get_file_date(audio_file)}</div>
+                <div class="waveform"></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            try:
+                # Audio player with better error handling
+                with open(audio_file, 'rb') as f:
+                    audio_bytes = f.read()
+                    # Create an AudioSegment to verify the file
+                    audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
+                    # Convert to WAV format for better compatibility
+                    wav_io = io.BytesIO()
+                    audio.export(wav_io, format='wav')
+                    wav_io.seek(0)
+                    st.audio(wav_io, format='audio/wav')
+            except Exception as e:
+                st.error(f"Unable to play audio file. Error: {str(e)}")
+
+            # Add a subtle separator
+            st.markdown("<hr style='margin: 5px 0; opacity: 0.2;'>", unsafe_allow_html=True)
+
+    # Main content area
+    if uploaded_file is not None:
+        try:
+            # Get the bytes once and reuse
+            audio_bytes = uploaded_file.getvalue()
+            
+            # Get audio duration
+            audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
+            duration_minutes = len(audio)/1000/60
+            
+            # Display duration in a sleek format
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                st.caption(f"🎵 Duration: {duration_minutes:.1f} min")
+            
+            # Create single progress bar above tabs
+            progress_bar = st.progress(0, text="Starting...")
+            
+            # Create tabs
+            tab1, tab2, tab3 = st.tabs(["Transcription", "Conversation", "Medical Summary"])
+            
+            # Process audio using the bytes we already have
+            transcription = transcribe_audio(audio_bytes, progress_bar)
+            
+            if transcription:
+                # Transcription tab
+                with tab1:
+                    st.header("Transcription")
+                    st.write(transcription)
+                
+                # Conversation tab
+                with tab2:
+                    st.header("Conversation")
+                    conversation = convert_to_conversation(transcription, progress_bar)
+                
+                # Medical Summary tab
+                with tab3:
+                    st.header("Medical Summary")
+                    if st.button("Generate Medical Summary"):
+                        medical_info = extract_medical_info(conversation if conversation else transcription, progress_bar)
+                        if medical_info:
+                            st.download_button(
+                                label="Download Summary",
+                                data=medical_info,
+                                file_name="medical_summary.txt",
+                                mime="text/plain"
+                            )
+
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
+    else:
+        st.write("Upload an MP3 file to get started.")
+
+if __name__ == "__main__":
+    main()
