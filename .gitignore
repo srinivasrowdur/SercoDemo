@@ -1,0 +1,25 @@
+# Environment variables
+.env
+
+# Audio files directory
+audio/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/
+
+# System files
+.DS_Store 

@@ -6,6 +6,7 @@ import io
 import shutil
 from openai import OpenAI
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -213,6 +214,30 @@ def extract_medical_info(text, progress_bar):
         st.error(f"Error extracting medical information: {str(e)}")
         return None
 
+def save_uploaded_file(uploaded_file):
+    """Save uploaded file to audio folder with timestamp"""
+    # Create audio directory if it doesn't exist
+    audio_dir = "audio"
+    if not os.path.exists(audio_dir):
+        os.makedirs(audio_dir)
+    
+    # Get file extension
+    file_extension = os.path.splitext(uploaded_file.name)[1]
+    
+    # Create filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    original_filename = os.path.splitext(uploaded_file.name)[0]
+    new_filename = f"{original_filename}_{timestamp}{file_extension}"
+    
+    # Full path for saving
+    file_path = os.path.join(audio_dir, new_filename)
+    
+    # Save the file
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getvalue())
+    
+    return file_path
+
 # Set page title
 st.title("Audio Transcription App")
 
@@ -221,6 +246,10 @@ uploaded_file = st.sidebar.file_uploader("Upload MP3", type=["mp3"])
 
 if uploaded_file is not None:
     try:
+        # Save the uploaded file
+        saved_file_path = save_uploaded_file(uploaded_file)
+        st.caption(f"📁 File saved: {os.path.basename(saved_file_path)}")
+        
         # Get the bytes directly from the uploaded file
         audio_bytes = uploaded_file.read()
         

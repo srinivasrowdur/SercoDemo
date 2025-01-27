@@ -1,0 +1,7 @@
+streamlit
+openai
+python-dotenv
+pydub
+transformers
+torch
+torchaudio 
