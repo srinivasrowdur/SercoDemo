@@ -30,5 +30,3 @@ env/
 # System files
 .DS_Store
 
-# Add this line to your existing .gitignore
-serco.png 
