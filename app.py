@@ -369,9 +369,10 @@ def main():
     get_or_create_session_state()
     
     # Set page title
-    st.title("Audio Transcription App")
+    st.title("Report Generator Agent")
 
-    # Sidebar for file upload
+    # Sidebar setup
+    st.sidebar.image("serco.png", width=150)  # Add logo at the top of sidebar
     st.sidebar.title("Audio Files")
 
     # File uploader
@@ -629,7 +630,7 @@ def main():
         except Exception as e:
             st.error(f"Error loading file content: {str(e)}")
     else:
-        st.write("Upload an MP3 file or select an existing recording to get started.")
+        st.write("Upload a recording to get started.")
 
 if __name__ == "__main__":
     main()
