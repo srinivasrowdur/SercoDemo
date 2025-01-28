@@ -579,13 +579,27 @@ def main():
                     if content:
                         st.markdown(content)
                 else:
-                    # Only generate conversation if no existing file
+                    # Create a single progress bar
+                    progress_bar = st.progress(0, text="Starting...")
+                    
+                    # Get transcription if needed
+                    transcription = None
+                    if associated_files['transcription']:
+                        transcription = load_markdown_file(associated_files['transcription'])
+                        if transcription:
+                            transcription = transcription.split("## Content\n\n")[-1]
+                    else:
+                        transcription = transcribe_audio(audio_bytes, progress_bar)
+                    
+                    # Only proceed if we have transcription
                     if transcription:
-                        progress_bar = st.progress(0, text="Generating conversation...")
                         conversation = convert_to_conversation(transcription, progress_bar)
                         if conversation:
                             conversation_path = save_conversation(conversation, original_filename, timestamp)
-                            st.markdown(load_markdown_file(conversation_path))
+                            # Display the saved conversation once
+                            saved_content = load_markdown_file(conversation_path)
+                            if saved_content:
+                                st.markdown(saved_content)
             
             # Medical Summary tab
             with tab3:
