@@ -8,17 +8,18 @@ class Orchestrator:
         self.client = client
         self.transcription_agent = TranscriptionAgent(client)
         self.conversation_agent = ConversationAgent(client)
+        self.context = {}  # Shared context between agents
 
     def process_transcription(self, audio_bytes, progress_callback):
         """Coordinate transcription of audio using the transcription agent"""
-        return self.transcription_agent.transcribe(audio_bytes, progress_callback)
+        return self.transcription_agent.transcribe(audio_bytes, progress_callback, self.context)
 
     def process_conversation(self, transcription_text, progress_callback):
         """Coordinate conversation generation using the conversation agent"""
-        if not callable(progress_callback):
-            # Create a no-op callback if none provided
-            progress_callback = lambda p, t: None
-        return self.conversation_agent.generate_conversation(transcription_text, progress_callback)
+        # Store transcription in context if not already there
+        if 'transcription' not in self.context:
+            self.context['transcription'] = transcription_text
+        return self.conversation_agent.generate_conversation(transcription_text, progress_callback, self.context)
 
     def process_audio(self, input_data, progress_callback):
         """Legacy method - kept for backward compatibility"""

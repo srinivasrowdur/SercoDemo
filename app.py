@@ -425,7 +425,14 @@ def process_audio_file(audio_bytes, progress_bar, operation_type="transcription"
             make_progress_callback(0, 1.0)
         )
     elif operation_type == "conversation":
-        if not use_existing_transcription:
+        # Don't transcribe again if we already have the text
+        if use_existing_transcription and transcription_text:
+            return orchestrator.process_conversation(
+                transcription_text,
+                make_progress_callback(0.4, 0.6)
+            )
+        else:
+            # Only transcribe if we don't have the text
             transcription_text = orchestrator.process_transcription(
                 audio_bytes,
                 make_progress_callback(0, 0.4)
@@ -433,10 +440,10 @@ def process_audio_file(audio_bytes, progress_bar, operation_type="transcription"
             if not transcription_text or transcription_text.startswith("Error"):
                 return None
 
-        return orchestrator.process_conversation(
-            transcription_text,
-            make_progress_callback(0.4, 0.6)
-        )
+            return orchestrator.process_conversation(
+                transcription_text,
+                make_progress_callback(0.4, 0.6)
+            )
     else:
         raise ValueError(f"Unknown operation type: {operation_type}")
 
@@ -587,17 +594,37 @@ def main():
                 if associated_files['transcription']:
                     content = load_markdown_file(associated_files['transcription'])
                     if content:
-                        st.markdown(content)
+                        transcription = content.split("## Content\n\n")[-1]
+                        # Store in orchestrator context
+                        orchestrator.context['transcription'] = transcription
+                    st.markdown(content)
                 else:
                     # Only transcribe if no existing file
                     progress_bar = st.progress(0, text="Starting transcription...")
-                    result = process_audio_file(audio_bytes, progress_bar, "transcription")
+                    
+                    def make_progress_callback(base_progress=0, scale=1.0):
+                        def callback(progress, text):
+                            if progress_bar and hasattr(progress_bar, 'progress'):
+                                update_progress(progress_bar, base_progress + (progress * scale), text)
+                        return callback
+                    
+                    # Use the progress callback
+                    result = orchestrator.process_transcription(
+                        audio_bytes, 
+                        make_progress_callback(0, 1.0)
+                    )
+                    
                     if result:
                         if result.startswith("Error"):
                             st.error(result)  # Display the detailed error message
                         else:
                             transcription_path = save_transcription(result, original_filename, timestamp)
-                            st.markdown(load_markdown_file(transcription_path))
+                            content = load_markdown_file(transcription_path)
+                            if content:
+                                transcription = content.split("## Content\n\n")[-1]
+                                # Store in orchestrator context
+                                orchestrator.context['transcription'] = transcription
+                            st.markdown(content)
             
             # Conversation tab
             with tab2:
@@ -607,42 +634,32 @@ def main():
                     if content:
                         st.markdown(content)
                 else:
-                    # Get transcription first if needed
-                    transcription = None
+                    # Check if we have transcription in context
+                    if 'transcription' not in orchestrator.context:
+                        st.error("Please generate a transcription first")
+                        return
+
                     progress_bar = st.progress(0, text="Starting...")
+                    message_placeholder = st.empty()
                     
-                    if associated_files['transcription']:
-                        content = load_markdown_file(associated_files['transcription'])
-                        if content:
-                            transcription = content.split("## Content\n\n")[-1]
-                            update_progress(progress_bar, 0.2, "Retrieved existing transcription...")
-                    else:
-                        # Generate new transcription
-                        result = process_audio_file(audio_bytes, progress_bar, "transcription")
-                        if result and not result.startswith("Error"):
-                            transcription = result
-                            transcription_path = save_transcription(result, original_filename, timestamp)
-                    
-                    if transcription:
-                        # Generate conversation from transcription
-                        update_progress(progress_bar, 0.4, "Generating conversation...")
-                        result = process_audio_file(
-                            None,
-                            progress_bar,  # Pass the progress_bar object directly
-                            operation_type="conversation",
-                            use_existing_transcription=True,
-                            transcription_text=transcription
-                        )
-                        
-                        if result and not result.startswith("Error"):
-                            conversation_path = save_conversation(result, original_filename, timestamp)
-                            st.markdown(load_markdown_file(conversation_path))
+                    def streaming_callback(progress, text):
+                        if text.endswith("▌"):
+                            message_placeholder.markdown(text[:-1], unsafe_allow_html=True)
                         else:
-                            st.error(f"Failed to generate conversation: {result}")  # Show error if any
-                    else:
-                        st.error("Failed to obtain transcription for conversation generation")
+                            update_progress(progress_bar, 0.4 + (progress * 0.6), text)
                     
-                    # Clear progress bar when done
+                    # Use transcription from context
+                    result = orchestrator.process_conversation(
+                        orchestrator.context['transcription'],
+                        streaming_callback
+                    )
+                    
+                    if result and not result.startswith("Error"):
+                        conversation_path = save_conversation(result, original_filename, timestamp)
+                        message_placeholder.markdown(result)
+                    else:
+                        st.error(f"Failed to generate conversation: {result}")
+                    
                     progress_bar.empty()
             
             # Medical Summary tab
