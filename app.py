@@ -365,6 +365,29 @@ def load_markdown_file(filepath):
     except Exception as e:
         return None
 
+def delete_recording(audio_file):
+    """Delete recording and its associated files"""
+    try:
+        # Find associated files
+        associated_files = find_associated_files(audio_file)
+        
+        # Delete audio file
+        if os.path.exists(audio_file):
+            os.remove(audio_file)
+            
+        # Delete transcription if exists
+        if associated_files['transcription'] and os.path.exists(associated_files['transcription']):
+            os.remove(associated_files['transcription'])
+            
+        # Delete conversation if exists
+        if associated_files['conversation'] and os.path.exists(associated_files['conversation']):
+            os.remove(associated_files['conversation'])
+            
+        return True
+    except Exception as e:
+        st.error(f"Error deleting files: {str(e)}")
+        return False
+
 def main():
     get_or_create_session_state()
     
@@ -444,27 +467,42 @@ def main():
                     audio.export(wav_io, format='wav')
                     wav_io.seek(0)
                     
-                    # Display audio player
-                    st.audio(wav_io, format='audio/wav')
+                    # Create two columns for the buttons
+                    col1, col2 = st.columns([3, 1])
                     
-                    # Check if files exist before showing the load button
-                    associated_files = find_associated_files(audio_file)
-                    has_files = associated_files['transcription'] is not None or associated_files['conversation'] is not None
+                    with col1:
+                        # Display audio player
+                        st.audio(wav_io, format='audio/wav')
+                        
+                        # Check if files exist before showing the load button
+                        associated_files = find_associated_files(audio_file)
+                        has_files = associated_files['transcription'] is not None or associated_files['conversation'] is not None
+                        
+                        # Add a button to load the file content
+                        button_label = f"Load {format_filename(audio_file)}"
+                        if has_files:
+                            if st.button(button_label, key=f"btn_{audio_file}"):
+                                st.session_state.selected_audio = audio_file
+                                st.rerun()
+                        else:
+                            # Disabled button with tooltip
+                            st.button(
+                                button_label, 
+                                key=f"btn_{audio_file}", 
+                                disabled=True,
+                                help="No transcription or conversation available yet"
+                            )
                     
-                    # Add a button to load the file content
-                    button_label = f"Load {format_filename(audio_file)}"
-                    if has_files:
-                        if st.button(button_label, key=f"btn_{audio_file}"):
-                            st.session_state.selected_audio = audio_file
-                            st.rerun()
-                    else:
-                        # Disabled button with tooltip
-                        st.button(
-                            button_label, 
-                            key=f"btn_{audio_file}", 
-                            disabled=True,
-                            help="No transcription or conversation available yet"
-                        )
+                    with col2:
+                        # Add delete button
+                        if st.button("🗑️", key=f"del_{audio_file}", 
+                                   help="Delete recording and associated files"):
+                            if delete_recording(audio_file):
+                                st.success("Recording deleted")
+                                # Clear selected audio if it was the deleted one
+                                if st.session_state.selected_audio == audio_file:
+                                    st.session_state.selected_audio = None
+                                st.rerun()
 
             except Exception as e:
                 st.error(f"Unable to play audio file. Error: {str(e)}")
