@@ -8,6 +8,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
 import glob
+from agents.orchestrator import Orchestrator
 
 # Load environment variables from .env file
 load_dotenv()
@@ -28,6 +29,9 @@ api_key = os.getenv("OPENAI_API_KEY")
 
 # Initialize OpenAI client with API key
 client = OpenAI(api_key=api_key)
+
+# Initialize orchestrator with OpenAI client
+orchestrator = Orchestrator(client)
 
 def update_progress(progress_bar, progress, status=""):
     progress_bar.progress(progress, text=status)
@@ -406,6 +410,36 @@ def delete_recording(audio_file):
         st.error(f"Error deleting files: {str(e)}")
         return False
 
+def process_audio_file(audio_bytes, progress_bar, operation_type="transcription", use_existing_transcription=False, transcription_text=None):
+    """Process audio file with progress updates"""
+    # Create a proper progress callback function
+    def make_progress_callback(base_progress=0, scale=1.0):
+        def callback(progress, text):
+            if progress_bar and hasattr(progress_bar, 'progress'):
+                update_progress(progress_bar, base_progress + (progress * scale), text)
+        return callback
+
+    if operation_type == "transcription":
+        return orchestrator.process_transcription(
+            audio_bytes, 
+            make_progress_callback(0, 1.0)
+        )
+    elif operation_type == "conversation":
+        if not use_existing_transcription:
+            transcription_text = orchestrator.process_transcription(
+                audio_bytes,
+                make_progress_callback(0, 0.4)
+            )
+            if not transcription_text or transcription_text.startswith("Error"):
+                return None
+
+        return orchestrator.process_conversation(
+            transcription_text,
+            make_progress_callback(0.4, 0.6)
+        )
+    else:
+        raise ValueError(f"Unknown operation type: {operation_type}")
+
 def main():
     get_or_create_session_state()
     
@@ -541,15 +575,6 @@ def main():
             # Create the file path that matches how it was saved in the sidebar
             saved_file_path = os.path.join("audio", f"{original_filename}_{timestamp}.mp3")
             
-            # Get audio duration
-            audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
-            duration_minutes = len(audio)/1000/60
-            
-            # Display duration in a sleek format
-            col1, col2 = st.columns([3, 1])
-            with col2:
-                st.caption(f"🎵 Duration: {duration_minutes:.1f} min")
-            
             # Create tabs
             tab1, tab2, tab3 = st.tabs(["Transcription", "Conversation", "Medical Summary"])
             
@@ -566,10 +591,13 @@ def main():
                 else:
                     # Only transcribe if no existing file
                     progress_bar = st.progress(0, text="Starting transcription...")
-                    transcription = transcribe_audio(audio_bytes, progress_bar)
-                    if transcription:
-                        transcription_path = save_transcription(transcription, original_filename, timestamp)
-                        st.markdown(load_markdown_file(transcription_path))
+                    result = process_audio_file(audio_bytes, progress_bar, "transcription")
+                    if result:
+                        if result.startswith("Error"):
+                            st.error(result)  # Display the detailed error message
+                        else:
+                            transcription_path = save_transcription(result, original_filename, timestamp)
+                            st.markdown(load_markdown_file(transcription_path))
             
             # Conversation tab
             with tab2:
@@ -579,27 +607,43 @@ def main():
                     if content:
                         st.markdown(content)
                 else:
-                    # Create a single progress bar
+                    # Get transcription first if needed
+                    transcription = None
                     progress_bar = st.progress(0, text="Starting...")
                     
-                    # Get transcription if needed
-                    transcription = None
                     if associated_files['transcription']:
-                        transcription = load_markdown_file(associated_files['transcription'])
-                        if transcription:
-                            transcription = transcription.split("## Content\n\n")[-1]
+                        content = load_markdown_file(associated_files['transcription'])
+                        if content:
+                            transcription = content.split("## Content\n\n")[-1]
+                            update_progress(progress_bar, 0.2, "Retrieved existing transcription...")
                     else:
-                        transcription = transcribe_audio(audio_bytes, progress_bar)
+                        # Generate new transcription
+                        result = process_audio_file(audio_bytes, progress_bar, "transcription")
+                        if result and not result.startswith("Error"):
+                            transcription = result
+                            transcription_path = save_transcription(result, original_filename, timestamp)
                     
-                    # Only proceed if we have transcription
                     if transcription:
-                        conversation = convert_to_conversation(transcription, progress_bar)
-                        if conversation:
-                            conversation_path = save_conversation(conversation, original_filename, timestamp)
-                            # Display the saved conversation once
-                            saved_content = load_markdown_file(conversation_path)
-                            if saved_content:
-                                st.markdown(saved_content)
+                        # Generate conversation from transcription
+                        update_progress(progress_bar, 0.4, "Generating conversation...")
+                        result = process_audio_file(
+                            None,
+                            progress_bar,  # Pass the progress_bar object directly
+                            operation_type="conversation",
+                            use_existing_transcription=True,
+                            transcription_text=transcription
+                        )
+                        
+                        if result and not result.startswith("Error"):
+                            conversation_path = save_conversation(result, original_filename, timestamp)
+                            st.markdown(load_markdown_file(conversation_path))
+                        else:
+                            st.error(f"Failed to generate conversation: {result}")  # Show error if any
+                    else:
+                        st.error("Failed to obtain transcription for conversation generation")
+                    
+                    # Clear progress bar when done
+                    progress_bar.empty()
             
             # Medical Summary tab
             with tab3:
