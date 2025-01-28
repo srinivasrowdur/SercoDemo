@@ -128,7 +128,7 @@ def convert_to_conversation(text, progress_bar):
         
         # Create streaming response
         stream = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": """
                 You are an expert medical transcriptionist with years of experience in documenting clinical conversations. 
@@ -289,6 +289,11 @@ def get_or_create_session_state():
         st.session_state.file_just_uploaded = False
     if 'selected_audio' not in st.session_state:
         st.session_state.selected_audio = None
+    if 'current_summary' not in st.session_state:
+        st.session_state.current_summary = None
+    # Clear summaries when switching files
+    if 'last_file' not in st.session_state:
+        st.session_state.last_file = None
 
 def save_transcription(transcription, original_filename, timestamp):
     """Save transcription to transcriptions folder"""
@@ -382,6 +387,19 @@ def delete_recording(audio_file):
         # Delete conversation if exists
         if associated_files['conversation'] and os.path.exists(associated_files['conversation']):
             os.remove(associated_files['conversation'])
+            
+        # Clean up session state
+        if 'current_summary' in st.session_state:
+            st.session_state.current_summary = None
+        if 'last_file' in st.session_state:
+            st.session_state.last_file = None
+        if 'selected_audio' in st.session_state:
+            st.session_state.selected_audio = None
+            
+        # Clear any summary keys for this file
+        summary_key = f"summary_{audio_file}"
+        if summary_key in st.session_state:
+            del st.session_state[summary_key]
             
         return True
     except Exception as e:
@@ -520,8 +538,8 @@ def main():
             original_filename = os.path.splitext(uploaded_file.name)[0]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Save the uploaded file first
-            saved_file_path = save_uploaded_file(uploaded_file)
+            # Create the file path that matches how it was saved in the sidebar
+            saved_file_path = os.path.join("audio", f"{original_filename}_{timestamp}.mp3")
             
             # Get audio duration
             audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
@@ -572,15 +590,22 @@ def main():
             # Medical Summary tab
             with tab3:
                 st.header("Medical Summary")
-                if st.button("Generate Medical Summary"):
-                    # Always try to get content from stored files first
+                
+                # Clear summary if we switched files
+                current_file = audio_file  # or saved_file_path depending on context
+                if st.session_state.last_file != current_file:
+                    if 'current_summary' in st.session_state:
+                        st.session_state.current_summary = None
+                    st.session_state.last_file = current_file
+                
+                # Generate button
+                if st.button("Generate Medical Summary", key=f"gen_summary_{current_file}"):
                     content = None
                     progress_bar = st.progress(0, text="Starting...")
                     
                     # Try to get conversation first, then transcription
                     if associated_files['conversation']:
                         content = load_markdown_file(associated_files['conversation'])
-                        # Remove the markdown headers to get just the content
                         if content:
                             content = content.split("## Dialogue\n\n")[-1]
                     elif associated_files['transcription']:
@@ -589,17 +614,20 @@ def main():
                             content = content.split("## Content\n\n")[-1]
                     
                     if content:
-                        medical_info = extract_medical_info(content, progress_bar)
-                        if medical_info:
-                            st.markdown(medical_info)
-                            st.download_button(
-                                label="Download Summary",
-                                data=medical_info,
-                                file_name="medical_summary.txt",
-                                mime="text/plain"
-                            )
+                        st.session_state.current_summary = extract_medical_info(content, progress_bar)
                     else:
-                        st.error("No transcription or conversation found. Please process the audio file first.")
+                        st.error("No content available for summary generation")
+                
+                # Display current summary if available
+                if st.session_state.current_summary:
+                    st.markdown(st.session_state.current_summary)
+                    st.download_button(
+                        label="Download Summary",
+                        data=st.session_state.current_summary,
+                        file_name="medical_summary.txt",
+                        mime="text/plain",
+                        key=f"download_{current_file}"
+                    )
 
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
@@ -636,15 +664,20 @@ def main():
             # Medical Summary tab
             with tab3:
                 st.header("Medical Summary")
-                if st.button("Generate Medical Summary"):
-                    # First try to get content from stored files
+                
+                # Store summary in session state to prevent regeneration
+                summary_key = f"summary_{audio_file}"
+                if summary_key not in st.session_state:
+                    st.session_state[summary_key] = None
+                
+                # Generate button with unique key
+                if st.button("Generate Medical Summary", key=f"gen_summary_{audio_file}"):
                     content = None
                     progress_bar = st.progress(0, text="Starting...")
                     
                     # Try to get conversation first, then transcription
                     if associated_files['conversation']:
                         content = load_markdown_file(associated_files['conversation'])
-                        # Remove the markdown headers to get just the content
                         if content:
                             content = content.split("## Dialogue\n\n")[-1]
                     elif associated_files['transcription']:
@@ -655,15 +688,19 @@ def main():
                     if content:
                         medical_info = extract_medical_info(content, progress_bar)
                         if medical_info:
-                            st.markdown(medical_info)
-                            st.download_button(
-                                label="Download Summary",
-                                data=medical_info,
-                                file_name="medical_summary.txt",
-                                mime="text/plain"
-                            )
-                    else:
-                        st.error("No content available for medical summary. Please process the audio file first.")
+                            # Store in session state
+                            st.session_state[summary_key] = medical_info
+                
+                # Display summary if available
+                if st.session_state[summary_key]:
+                    st.markdown(st.session_state[summary_key])
+                    st.download_button(
+                        label="Download Summary",
+                        data=st.session_state[summary_key],
+                        file_name="medical_summary.txt",
+                        mime="text/plain",
+                        key=f"download_{audio_file}"
+                    )
 
         except Exception as e:
             st.error(f"Error loading file content: {str(e)}")
