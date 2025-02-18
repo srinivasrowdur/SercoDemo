@@ -1,14 +1,15 @@
 import streamlit as st
 import tempfile
 import os
-from pydub import AudioSegment
-import io
 import shutil
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
-import glob
 from agents.orchestrator import Orchestrator
+from agents.error_handler import ErrorHandler, AudioProcessingError, TranscriptionError, ConversationError, APIError
+from utils.audio_utils import AudioUtils
+from utils.file_utils import FileUtils
+from utils.ui_utils import UIUtils
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,39 +31,13 @@ api_key = os.getenv("OPENAI_API_KEY")
 # Initialize OpenAI client with API key
 client = OpenAI(api_key=api_key)
 
-# Initialize orchestrator with OpenAI client
+# Initialize orchestrator with OpenAI client and error handler
+error_handler = ErrorHandler()
 orchestrator = Orchestrator(client)
 
+# Using UIUtils for progress updates
 def update_progress(progress_bar, progress, status=""):
-    progress_bar.progress(progress, text=status)
-
-def convert_to_wav(audio_bytes):
-    try:
-        # Read directly from bytes
-        audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
-        audio = audio.set_frame_rate(16000).set_channels(1)
-        wav_io = io.BytesIO()
-        audio.export(wav_io, format="wav")
-        wav_io.seek(0)
-        return wav_io.read()
-    except Exception as e:
-        st.error(f"Error converting audio: {str(e)}")
-        return None
-
-def split_audio(audio_segment):
-    """Split audio into 5-minute chunks"""
-    chunk_length_ms = 5 * 60 * 1000  # 5 minutes in milliseconds
-    chunks = []
-    duration_ms = len(audio_segment)
-    
-    # Split into 5-minute chunks
-    for i in range(0, duration_ms, chunk_length_ms):
-        chunk = audio_segment[i:i + chunk_length_ms]
-        # Convert to mono and set sample rate to reduce file size
-        chunk = chunk.set_channels(1).set_frame_rate(16000)
-        chunks.append(chunk)
-    
-    return chunks
+    UIUtils.update_progress(progress_bar, progress, status)
 
 def transcribe_audio(audio_bytes, progress_bar):
     try:
@@ -237,67 +212,22 @@ def extract_medical_info(text, progress_bar):
         st.error(f"Error extracting medical information: {str(e)}")
         return None
 
+# Using FileUtils for file operations
 def save_uploaded_file(uploaded_file):
-    """Save uploaded file to audio folder with timestamp"""
-    # Create audio directory if it doesn't exist
-    audio_dir = "audio"
-    if not os.path.exists(audio_dir):
-        os.makedirs(audio_dir)
-    
-    # Get file extension
-    file_extension = os.path.splitext(uploaded_file.name)[1]
-    
-    # Create filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    original_filename = os.path.splitext(uploaded_file.name)[0]
-    new_filename = f"{original_filename}_{timestamp}{file_extension}"
-    
-    # Full path for saving
-    file_path = os.path.join(audio_dir, new_filename)
-    
-    # Save the file
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getvalue())
-    
-    return file_path
+    return FileUtils.save_uploaded_file(uploaded_file)
 
 def list_audio_files():
-    """List all audio files in the audio directory"""
-    if not os.path.exists("audio"):
-        return []
-    return sorted(glob.glob("audio/*.mp3"), key=os.path.getmtime, reverse=True)
+    return FileUtils.list_audio_files()
 
 def format_filename(filepath):
-    """Format filename for display"""
-    filename = os.path.basename(filepath)
-    name, _ = os.path.splitext(filename)
-    # Split by underscore and remove timestamp
-    parts = name.split('_')[:-2]  # Assuming format: name_YYYYMMDD_HHMMSS
-    return ' '.join(parts).title()
+    return FileUtils.format_filename(filepath)
 
 def get_file_date(filepath):
-    """Get formatted date from filename"""
-    filename = os.path.basename(filepath)
-    timestamp = filename.split('_')[-2:]  # Get YYYYMMDD_HHMMSS
-    if len(timestamp) >= 2:
-        datetime_str = f"{timestamp[0]}_{timestamp[1]}"
-        try:
-            file_date = datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
-            return file_date.strftime("%b %d, %Y %I:%M %p")
-        except:
-            return "Date unknown"
-    return "Date unknown"
+    return FileUtils.get_file_date(filepath)
 
+# Using UIUtils for session state management
 def get_or_create_session_state():
-    if 'file_just_uploaded' not in st.session_state:
-        st.session_state.file_just_uploaded = False
-    if 'selected_audio' not in st.session_state:
-        st.session_state.selected_audio = None
-    if 'current_summary' not in st.session_state:
-        st.session_state.current_summary = None
-    # Clear summaries when switching files
-    if 'last_file' not in st.session_state:
-        st.session_state.last_file = None
+    UIUtils.get_or_create_session_state()
 
 def save_transcription(transcription, original_filename, timestamp):
     """Save transcription to transcriptions folder"""
