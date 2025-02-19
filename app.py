@@ -454,7 +454,6 @@ def main():
     st.title("Report Generator Agent")
 
     # Sidebar setup
-    st.sidebar.image("serco.png", width=150)  # Add logo at the top of sidebar
     st.sidebar.title("Audio Files")
 
     # File uploader
