@@ -1,10 +1,38 @@
+import sys
+import os
+
+# Add Homebrew bin directory to PATH to find ffmpeg
+brew_bin_path = "/opt/homebrew/bin"
+if os.path.exists(brew_bin_path) and brew_bin_path not in os.environ["PATH"]:
+    os.environ["PATH"] = f"{brew_bin_path}:{os.environ['PATH']}"
+    print(f"Added {brew_bin_path} to PATH")
+
+print("Python path:", sys.path)
+
 import streamlit as st
 import tempfile
 import os
 from pydub import AudioSegment
 import io
 import shutil
-from openai import OpenAI
+
+print("Attempting to import google-genai...")
+try:
+    from google import genai
+    print("Successfully imported google.genai")
+    # Client is initialized later with API key
+except ImportError as e:
+    print(f"Error importing genai: {e}")
+    # Try a workaround
+    try:
+        import google.genai
+        print("Imported via google.genai")
+        # Client is initialized later
+    except ImportError as e:
+        print(f"Second attempt failed: {e}")
+        st.error(f"Failed to import Google GenAI. Please check your installation: {e}")
+        st.stop()
+
 from dotenv import load_dotenv
 from datetime import datetime
 import glob
@@ -25,12 +53,12 @@ if not shutil.which('ffmpeg'):
     st.stop()
 
 # Get API key from environment variable
-api_key = os.getenv("OPENAI_API_KEY")
+api_key = os.getenv("GOOGLE_API_KEY")
 
-# Initialize OpenAI client with API key
-client = OpenAI(api_key=api_key)
+# Initialize Google Gemini client with API key - using new API
+client = genai.Client(api_key=api_key)
 
-# Initialize orchestrator with OpenAI client
+# Initialize orchestrator with Google Gemini client
 orchestrator = Orchestrator(client)
 
 def update_progress(progress_bar, progress, status=""):
@@ -92,14 +120,18 @@ def transcribe_audio(audio_bytes, progress_bar):
                 temp_file_path = temp_file.name
 
             try:
-                # Transcribe chunk
-                with open(temp_file_path, "rb") as audio_file:
-                    transcription = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file,
-                        response_format="text"
-                    )
-                    full_transcription.append(transcription)
+                # Upload and transcribe the file with Gemini
+                gemini_file = client.files.upload(file=temp_file_path)
+                
+                # Generate content with the audio file and a prompt for transcription
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=["Provide a precise transcript of this audio, with exact words and no summarization.", 
+                              gemini_file]
+                )
+                
+                transcription = response.text
+                full_transcription.append(transcription)
             except Exception as chunk_error:
                 st.error(f"Error processing chunk {i+1}: {str(chunk_error)}")
                 continue
@@ -130,38 +162,37 @@ def convert_to_conversation(text, progress_bar):
         
         update_progress(progress_bar, 0.8, "Generating conversation...")
         
-        # Create streaming response
-        stream = client.chat.completions.create(
-            model="o3-mini",
-            messages=[
-                {"role": "system", "content": """
-                You are an expert medical transcriptionist with years of experience in documenting clinical conversations. 
-                Your task is to convert the following text into a precise dialogue format, ensuring:
-                
-                1. Maintain absolute accuracy of medical terminology and dosages
-                2. Preserve all clinical details, no matter how minor they might seem
-                3. Keep exact numbers, measurements, and timelines as mentioned
-                4. Retain all mentions of:
-                   - Symptoms and their duration
-                   - Medications and their dosages
-                   - Treatment plans and schedules
-                   - Patient concerns and doctor's responses
-                   - Follow-up instructions
-                   - Side effects or adverse reactions discussed
-                   - Lifestyle recommendations
-                
-                Format the conversation as a natural dialogue with clear speaker labels and line breaks between speakers.
-                Do not summarize or omit any details - every word could be clinically significant.
-                """},
-                {"role": "user", "content": text}
-            ],
-            stream=True
+        # System prompt for the model
+        system_prompt = """
+        You are an expert medical transcriptionist with years of experience in documenting clinical conversations. 
+        Your task is to convert the following text into a precise dialogue format, ensuring:
+        
+        1. Maintain absolute accuracy of medical terminology and dosages
+        2. Preserve all clinical details, no matter how minor they might seem
+        3. Keep exact numbers, measurements, and timelines as mentioned
+        4. Retain all mentions of:
+           - Symptoms and their duration
+           - Medications and their dosages
+           - Treatment plans and schedules
+           - Patient concerns and doctor's responses
+           - Follow-up instructions
+           - Side effects or adverse reactions discussed
+           - Lifestyle recommendations
+        
+        Format the conversation as a natural dialogue with clear speaker labels and line breaks between speakers.
+        Do not summarize or omit any details - every word could be clinically significant.
+        """
+        
+        # Create streaming response with the new API
+        response = client.models.generate_content_stream(
+            model="gemini-2.0-flash",
+            contents=["System instructions: " + system_prompt, text]
         )
         
         # Process the streaming response
-        for chunk in stream:
-            if chunk.choices[0].delta.content is not None:
-                full_response += chunk.choices[0].delta.content
+        for chunk in response:
+            if chunk.text:
+                full_response += chunk.text
                 message_placeholder.markdown(full_response + "▌")
         
         # Display final response
@@ -179,54 +210,53 @@ def extract_medical_info(text, progress_bar):
         
         update_progress(progress_bar, 0.9, "Generating medical summary...")
         
-        # Create streaming response
-        stream = client.chat.completions.create(
-            model="o3-mini",
-            messages=[
-                {"role": "system", "content": """
-                You are a medical documentation specialist. Extract and organize the following information from the conversation in a detailed, structured format:
+        # System prompt for medical documentation
+        system_prompt = """
+        You are a medical documentation specialist. Extract and organize the following information from the conversation in a detailed, structured format:
 
-                1. Medications:
-                   - Name of each medication
-                   - Dosage prescribed
-                   - Frequency of administration
-                   - Duration of treatment
-                   - Route of administration
+        1. Medications:
+           - Name of each medication
+           - Dosage prescribed
+           - Frequency of administration
+           - Duration of treatment
+           - Route of administration
 
-                2. Treatment Plan:
-                   - Prescribed treatments/procedures
-                   - Treatment schedule
-                   - Treatment duration
-                   - Special instructions
+        2. Treatment Plan:
+           - Prescribed treatments/procedures
+           - Treatment schedule
+           - Treatment duration
+           - Special instructions
 
-                3. Side Effects:
-                   - Reported side effects
-                   - Potential side effects discussed
-                   - Warnings given
+        3. Side Effects:
+           - Reported side effects
+           - Potential side effects discussed
+           - Warnings given
 
-                4. Effectiveness:
-                   - Reported effectiveness of current/previous treatments
-                   - Expected outcomes
-                   - Follow-up requirements
+        4. Effectiveness:
+           - Reported effectiveness of current/previous treatments
+           - Expected outcomes
+           - Follow-up requirements
 
-                5. Important Notes:
-                   - Any specific warnings
-                   - Contraindications
-                   - Drug interactions
-                   - Lifestyle modifications
+        5. Important Notes:
+           - Any specific warnings
+           - Contraindications
+           - Drug interactions
+           - Lifestyle modifications
 
-                Format the information clearly with headers and bullet points. If any information is not mentioned in the conversation, indicate 'Not discussed' for that section.
-                Only include information that was explicitly mentioned in the conversation - do not make assumptions or add information not present in the transcript.
-                """},
-                {"role": "user", "content": text}
-            ],
-            stream=True  # Enable streaming
+        Format the information clearly with headers and bullet points. If any information is not mentioned in the conversation, indicate 'Not discussed' for that section.
+        Only include information that was explicitly mentioned in the conversation - do not make assumptions or add information not present in the transcript.
+        """
+        
+        # Create streaming response with the new API
+        response = client.models.generate_content_stream(
+            model="gemini-2.0-flash",
+            contents=["System instructions: " + system_prompt, text]
         )
         
         # Process the streaming response without displaying intermediate results
-        for chunk in stream:
-            if chunk.choices[0].delta.content is not None:
-                full_response += chunk.choices[0].delta.content
+        for chunk in response:
+            if chunk.text:
+                full_response += chunk.text
         
         # Format the markdown properly
         # Ensure headers have space after # and lists have proper spacing
@@ -799,4 +829,10 @@ def main():
         st.write("Upload a recording to get started.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"ERROR: {str(e)}")
+        traceback.print_exc()
+        st.error(f"Error: {str(e)}")

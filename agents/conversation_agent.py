@@ -1,5 +1,5 @@
-from swarm import Swarm, Agent
 import time
+from google import genai
 
 class ConversationAgent:
     def __init__(self, client):
@@ -18,11 +18,8 @@ class ConversationAgent:
             if callable(progress_callback):
                 progress_callback(0.2, "Generating conversation...")
 
-            # Create messages for the API with detailed medical transcription instructions
-            messages = [
-                {
-                    "role": "system", 
-                    "content": """You are an expert medical transcriptionist with a critical responsibility to preserve medical records with 100% accuracy. Your task is to convert the text into a precise dialogue format with these strict requirements:
+            # System prompt for the model
+            system_prompt = """You are an expert medical transcriptionist with a critical responsibility to preserve medical records with 100% accuracy. Your task is to convert the text into a precise dialogue format with these strict requirements:
 
 1. CRITICAL: Every single word from the original transcription MUST be included - no omissions allowed
 
@@ -69,29 +66,23 @@ class ConversationAgent:
    - NO standardizing speaker labels
 
 Remember: This is a legal medical record - every word and speaker identification must be preserved exactly as in the original transcript."""
-                },
-                {"role": "user", "content": text}
-            ]
 
-            # Get streaming response
-            full_response = ""
-            stream = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                stream=True
+            # Generate streaming response with the new API
+            response = self.client.models.generate_content_stream(
+                model="gemini-2.0-flash",
+                contents=["System instructions: " + system_prompt, text]
             )
-
+            
             # Process the stream
-            for chunk in stream:
-                if hasattr(chunk.choices[0].delta, 'content'):
-                    content = chunk.choices[0].delta.content
-                    if content is not None:
-                        full_response += content
-                        # Update UI with streaming content
-                        if callable(progress_callback):
-                            progress_callback(0.6, full_response + "▌")
-                            # Add a small delay to allow Streamlit to update
-                            time.sleep(0.01)
+            full_response = ""
+            for chunk in response:
+                if chunk.text:
+                    full_response += chunk.text
+                    # Update UI with streaming content
+                    if callable(progress_callback):
+                        progress_callback(0.6, full_response + "▌")
+                        # Add a small delay to allow Streamlit to update
+                        time.sleep(0.01)
 
             # Final progress update
             if callable(progress_callback):

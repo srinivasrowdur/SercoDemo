@@ -1,8 +1,9 @@
-from swarm import Swarm, Agent
 import tempfile
 import io
 from pydub import AudioSegment
 import os
+from google import genai
+from google.genai import types
 
 class TranscriptionAgent:
     def __init__(self, client):
@@ -58,14 +59,18 @@ class TranscriptionAgent:
                         temp_file_path = temp_file.name
 
                     try:
-                        # Transcribe chunk
-                        with open(temp_file_path, "rb") as audio_file:
-                            transcription = self.client.audio.transcriptions.create(
-                                model="gpt-4o-mini-transcribe",
-                                file=audio_file,
-                                response_format="text"
-                            )
-                            full_transcription.append(transcription)
+                        # Upload and transcribe the file with Gemini
+                        gemini_file = self.client.files.upload(file=temp_file_path)
+                        
+                        # Generate content with the audio file and a prompt for transcription
+                        response = self.client.models.generate_content(
+                            model="gemini-2.0-flash",
+                            contents=["Provide a precise transcript of this audio, with exact words and no summarization.", 
+                                      gemini_file]
+                        )
+                        
+                        transcription = response.text
+                        full_transcription.append(transcription)
                     except Exception as chunk_error:
                         return f"Error processing chunk {i+1}: {str(chunk_error)}"
                     finally:

@@ -1,25 +1,18 @@
-from swarm import Agent
+from google import genai
 
-class MedicalSummaryAgent(Agent):
+class MedicalSummaryAgent:
     def __init__(self, client):
-        super().__init__(
-            name="Medical Summary Agent",
-            model="gpt-4",
-            instructions="You are a medical summarization expert. Extract and organize key medical information.",
-            functions=[self.generate_summary]
-        )
         self.client = client
+        self.instructions = "You are a medical summarization expert. Extract and organize key medical information."
         
     def generate_summary(self, text):
         """Generate a medical summary from the conversation"""
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": self.instructions},
-                    {"role": "user", "content": text}
-                ]
+            # Generate streaming response with the new API
+            response = self.client.models.generate_content_stream(
+                model="gemini-2.0-flash",
+                contents=["System instructions: " + self.instructions, text]
             )
-            return response.choices[0].message.content
+            return response.text
         except Exception as e:
             return f"Error generating summary: {str(e)}" 
