@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Environment variables
+.env
+
+# Virtual Environment
+venv/
+env/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Audio and transcription files
+audio/
+*.wav
+*.mp3
+*.m4a
+transcriptions/
+transcriptions/*.txt
+conversations/
+conversations/*.json
+
+# IDE
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore 

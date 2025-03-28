@@ -1,4 +1,3 @@
-from swarm import Swarm, Agent
 from openai import OpenAI
 from .transcription_agent import TranscriptionAgent
 from .conversation_agent import ConversationAgent
