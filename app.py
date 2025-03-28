@@ -223,16 +223,34 @@ def extract_medical_info(text, progress_bar):
             stream=True  # Enable streaming
         )
         
-        # Process the streaming response
+        # Process the streaming response without displaying intermediate results
         for chunk in stream:
             if chunk.choices[0].delta.content is not None:
                 full_response += chunk.choices[0].delta.content
-                message_placeholder.markdown(full_response + "▌")
         
-        # Display final response
-        message_placeholder.markdown(full_response)
+        # Format the markdown properly
+        # Ensure headers have space after # and lists have proper spacing
+        formatted_response = ""
+        for line in full_response.split('\n'):
+            # Fix headers (ensure space after #)
+            if line.startswith('#') and not line.startswith('# '):
+                line = line.replace('#', '# ', 1)
+            
+            # Fix nested lists (ensure proper indentation)
+            if line.strip().startswith('-') or line.strip().startswith('*'):
+                if line.strip() != line:  # It's indented
+                    # Make sure indentation is consistent (use 4 spaces)
+                    indent_level = len(line) - len(line.lstrip())
+                    line = ' ' * indent_level + '- ' + line.strip()[1:].strip()
+                else:
+                    line = '- ' + line.strip()[1:].strip()
+            
+            formatted_response += line + '\n'
+        
+        # Only display the final response once at the end
         update_progress(progress_bar, 1.0, "Complete!")
-        return full_response
+        message_placeholder.markdown(formatted_response)
+        return formatted_response
     except Exception as e:
         st.error(f"Error extracting medical information: {str(e)}")
         return None
@@ -688,13 +706,14 @@ def main():
                             content = content.split("## Content\n\n")[-1]
                     
                     if content:
+                        # Store the result in session state but don't display it again here
                         st.session_state.current_summary = extract_medical_info(content, progress_bar)
                     else:
                         st.error("No content available for summary generation")
                 
                 # Display current summary if available
                 if st.session_state.current_summary:
-                    st.markdown(st.session_state.current_summary)
+                    # We don't need to render it again since extract_medical_info already did
                     st.download_button(
                         label="Download Summary",
                         data=st.session_state.current_summary,
@@ -760,14 +779,12 @@ def main():
                             content = content.split("## Content\n\n")[-1]
                     
                     if content:
-                        medical_info = extract_medical_info(content, progress_bar)
-                        if medical_info:
-                            # Store in session state
-                            st.session_state[summary_key] = medical_info
+                        # Store the result in session state - extract_medical_info will display it once
+                        st.session_state[summary_key] = extract_medical_info(content, progress_bar)
                 
                 # Display summary if available
                 if st.session_state[summary_key]:
-                    st.markdown(st.session_state[summary_key])
+                    # We don't need to display the summary again since extract_medical_info already did
                     st.download_button(
                         label="Download Summary",
                         data=st.session_state[summary_key],
