@@ -3,17 +3,23 @@
 
 # Audio files directory
 audio/
+*.wav
+*.mp3
+*.m4a
 
 # Transcriptions directory
 transcriptions/
+transcriptions/*.txt
 
 # Conversations directory
 conversations/
+conversations/*.json
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.log
 
 # Virtual Environment
 venv/

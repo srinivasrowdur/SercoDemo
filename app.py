@@ -132,7 +132,7 @@ def convert_to_conversation(text, progress_bar):
         
         # Create streaming response
         stream = client.chat.completions.create(
-            model="gpt-4",
+            model="o3-mini",
             messages=[
                 {"role": "system", "content": """
                 You are an expert medical transcriptionist with years of experience in documenting clinical conversations. 
@@ -181,7 +181,7 @@ def extract_medical_info(text, progress_bar):
         
         # Create streaming response
         stream = client.chat.completions.create(
-            model="gpt-4",
+            model="o3-mini",
             messages=[
                 {"role": "system", "content": """
                 You are a medical documentation specialist. Extract and organize the following information from the conversation in a detailed, structured format:
