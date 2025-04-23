@@ -1,0 +1,22 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/medical-transcription/streamlit-app:$COMMIT_SHA', '.']
+  
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/medical-transcription/streamlit-app:$COMMIT_SHA']
+
+  # Update the deployment with the new image
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'container'
+      - 'images'
+      - 'add-tag'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/medical-transcription/streamlit-app:$COMMIT_SHA'
+      - '--dest-tag=latest'
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/medical-transcription/streamlit-app:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/medical-transcription/streamlit-app:latest' 

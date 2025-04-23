@@ -36,3 +36,9 @@ env/
 # System files
 .DS_Store
 
+# Configuration files
+secrets.yaml
+credentials.json
+*.key
+*.pem
+

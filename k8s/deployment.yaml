@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medical-transcription
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medical-transcription
+  template:
+    metadata:
+      labels:
+        app: medical-transcription
+    spec:
+      containers:
+      - name: medical-transcription
+        image: us-central1-docker.pkg.dev/serco-sandbox-landing-01/medical-transcription/streamlit-app:latest
+        command: ["sh", "-c"]
+        args: ["service nginx start && streamlit run --server.port=8501 --server.address=localhost app.py"]
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PORT
+          value: "8080"
+        - name: STREAMLIT_SERVER_PORT
+          value: "8501"
+        - name: STREAMLIT_SERVER_ADDRESS
+          value: "localhost"
+        - name: STREAMLIT_SERVER_HEADLESS
+          value: "true"
+        - name: STREAMLIT_SERVER_ENABLE_CORS
+          value: "true"
+        envFrom:
+        - secretRef:
+            name: openai-credentials
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        volumeMounts:
+        - name: audio-storage
+          mountPath: /app/audio
+        - name: transcription-storage
+          mountPath: /app/transcriptions
+        - name: conversation-storage
+          mountPath: /app/conversations
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: audio-storage
+        emptyDir: {}
+      - name: transcription-storage
+        emptyDir: {}
+      - name: conversation-storage
+        emptyDir: {} 
