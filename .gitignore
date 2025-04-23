@@ -38,7 +38,12 @@ env/
 
 # Configuration files
 secrets.yaml
+secret.yaml
 credentials.json
 *.key
 *.pem
+
+# Kubernetes secrets
+k8s/*secret*.yaml
+k8s/*credentials*.yaml
 
